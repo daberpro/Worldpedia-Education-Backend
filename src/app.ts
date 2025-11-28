@@ -1,5 +1,3 @@
-// src/app.ts
-
 import express, { Express, Request, Response } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -16,7 +14,9 @@ import {
   formRoutes,
   helpRoutes,
   analyticsRoutes,
-  userRoutes
+  userRoutes,
+  emailRoutes,
+  uploadRoutes
 } from './routes';
 
 // Middleware
@@ -183,6 +183,14 @@ export const createApp = (): Express => {
   app.use('/api/users', userRoutes);
   logger.info('✅ User routes mounted on /api/users');
 
+  // Email Routes
+  app.use('/api/email', emailRoutes);
+  logger.info('✅ Email routes mounted on /api/email');
+
+  // Upload Routes
+  app.use('/api/upload', uploadRoutes);
+  logger.info('✅ Upload routes mounted on /api/upload');
+
   /**
    * ============================================================================
    * API DOCUMENTATION ENDPOINT
@@ -204,7 +212,9 @@ export const createApp = (): Express => {
         forms: '/api/forms',
         help: '/api/help',
         analytics: '/api/analytics',
-        users: '/api/users'
+        users: '/api/users',
+        email: '/api/email',
+        upload: '/api/upload'
       },
       documentation: 'See CONTROLLERS_ROUTES_MAPPING.md for detailed endpoint documentation'
     });

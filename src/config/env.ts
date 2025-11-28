@@ -47,6 +47,13 @@ export const config = {
     from: process.env.SMTP_FROM || 'noreply@worldpedia.com'
   },
   
+  // Redis (for Email Queue)
+  redis: {
+    host: process.env.REDIS_HOST || 'localhost',
+    port: parseInt(process.env.REDIS_PORT || '6379', 10),
+    password: process.env.REDIS_PASSWORD
+  },
+  
   // Cloudinary
   cloudinary: {
     cloudName: process.env.CLOUDINARY_CLOUD_NAME,

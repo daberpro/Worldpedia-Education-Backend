@@ -11,3 +11,10 @@ export { default as formRoutes } from './form.routes';
 export { default as helpRoutes } from './help.routes';
 export { default as analyticsRoutes } from './analytics.routes';
 export { default as userRoutes } from './user.routes';
+export { default as emailRoutes } from './email.routes';
+export { default as uploadRoutes } from './upload.routes';
+
+
+
+
+
