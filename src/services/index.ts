@@ -16,3 +16,5 @@ export { UploadService } from './upload.service';
 export { ImageService } from './image.service';
 export { PaymentService } from './payment.service';
 export { TransactionService } from './transaction.service';
+export { GoogleOAuthService } from './google-oauth.service';
+export { OAuthService } from './oauth.service';

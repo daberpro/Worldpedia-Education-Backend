@@ -21,7 +21,6 @@
   "author": "Worldpedia Team",
   "license": "ISC",
   "dependencies": {
-    "@types/passport-google-oauth20": "^2.0.17",
     "axios": "^1.13.2",
     "bcryptjs": "2.4.3",
     "bull": "^4.16.5",
@@ -62,6 +61,8 @@
     "@types/multer": "^2.0.0",
     "@types/node": "20.10.6",
     "@types/nodemailer": "^6.4.21",
+    "@types/passport": "^1.0.17",
+    "@types/passport-google-oauth20": "^2.0.17",
     "@types/uuid": "^10.0.0",
     "nodemon": "^3.0.2",
     "ts-node": "10.9.2",

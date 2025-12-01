@@ -6,6 +6,7 @@ export * from './api.types';
 export * from './auth.types';
 export * from './request.types';
 export * from './error.types';
+export * from './oauth.types';
 
 // Re-export commonly used types
 export type {

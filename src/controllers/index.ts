@@ -13,3 +13,4 @@ export { UserController } from './user.controller';
 export { EmailController } from './email.controller';
 export { UploadController } from './upload.controller';
 export { PaymentController } from './payment.controller';
+export { OAuthController } from './oauth.controller';

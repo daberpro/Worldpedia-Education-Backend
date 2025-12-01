@@ -1,5 +1,3 @@
-// src/middleware/index.ts
-
 /**
  * Central export point for all middleware
  */
@@ -26,3 +24,5 @@ export {
   responseHeaders,
   apiVersion
 } from './security';
+export { initializePassport } from './google-passport';
+export { verifyOAuthState } from './oauth.middleware';
