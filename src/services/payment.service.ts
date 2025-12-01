@@ -19,15 +19,11 @@ import {
 import { NotFoundError, ValidationError } from '../types/error.types';
 
 export class PaymentService {
-  /**
-   * Create new transaction with Midtrans & Save to DB (Atomic)
-   */
   async createTransaction(request: TransactionRequest): Promise<CreatePaymentResponse> {
     const session = await mongoose.startSession();
     session.startTransaction();
 
     try {
-      // 1. Validate Request
       const validation = validateTransactionRequest(request);
       if (!validation.valid) {
         throw new ValidationError(`Validation failed: ${validation.errors.join(', ')}`);
@@ -38,17 +34,14 @@ export class PaymentService {
         throw new ValidationError(amountValidation.error || 'Invalid amount');
       }
 
-      // 2. Generate IDs
       const transactionId = uuidv4();
       const orderId = `${request.userId}-${Date.now()}`;
-      const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour expiry
       const enrollmentId = request.metadata?.enrollmentId;
 
       if (!enrollmentId) {
         throw new ValidationError('Enrollment ID is required in metadata');
       }
 
-      // 3. Prepare Midtrans Parameter
       const parameter = {
         transaction_details: {
           order_id: orderId,
@@ -90,10 +83,8 @@ export class PaymentService {
         }
       };
 
-      // 4. Call Midtrans Snap API
       const midtransResult: any = await snapClient.createTransaction(parameter);
 
-      // 5. Save to MongoDB
       const payment = new Payment({
         transactionId,
         orderId,
@@ -110,7 +101,7 @@ export class PaymentService {
       await payment.save({ session });
       
       await session.commitTransaction();
-      logger.info(`✅ Transaction created & saved: ${orderId}`);
+      logger.info(`Transaction created: ${orderId}`);
 
       return {
         success: true,
@@ -119,7 +110,7 @@ export class PaymentService {
         amount: request.amount,
         snapToken: midtransResult.token,
         redirectUrl: midtransResult.redirect_url,
-        expiresAt,
+        expiresAt: new Date(Date.now() + 60 * 60 * 1000),
         message: 'Payment transaction created successfully'
       };
 
@@ -132,16 +123,11 @@ export class PaymentService {
     }
   }
 
-  /**
-   * Verify payment status from Midtrans and Update DB
-   */
   async verifyPayment(transactionId: string): Promise<VerifyPaymentResponse> {
     try {
-      // 1. Check Midtrans status
       const result: any = await (coreApi as any).transaction.status(transactionId);
       const status = mapMidtransStatus(result.transaction_status, result.fraud_status);
 
-      // 2. Update Local DB
       const payment = await Payment.findOne({ 
         $or: [{ transactionId }, { orderId: transactionId }] 
       });
@@ -152,20 +138,12 @@ export class PaymentService {
         
         if (status === PaymentStatus.SETTLEMENT || status === PaymentStatus.CAPTURE) {
           payment.paidAt = result.settlement_time ? new Date(result.settlement_time) : new Date();
-          
-          // Activate Enrollment
-          await Enrollment.findByIdAndUpdate(payment.enrollmentId, { 
-            status: 'active',
-            progress: 0 
-          });
+          await Enrollment.findByIdAndUpdate(payment.enrollmentId, { status: 'active', progress: 0 });
         } else if (status === PaymentStatus.CANCEL || status === PaymentStatus.EXPIRE) {
-          await Enrollment.findByIdAndUpdate(payment.enrollmentId, { 
-            status: 'cancelled' 
-          });
+          await Enrollment.findByIdAndUpdate(payment.enrollmentId, { status: 'cancelled' });
         }
         
         await payment.save();
-        logger.info(`✅ Payment status updated via verify: ${payment.orderId} -> ${status}`);
       }
 
       return {
@@ -183,57 +161,33 @@ export class PaymentService {
     }
   }
 
-  /**
-   * Process Webhook & Update Status (Atomic)
-   */
   async processWebhook(payload: any): Promise<{ success: boolean; status: PaymentStatus }> {
     const session = await mongoose.startSession();
     session.startTransaction();
 
     try {
-      const { 
-        order_id, 
-        transaction_status, 
-        fraud_status, 
-        payment_type, 
-        transaction_id, 
-        signature_key, 
-        gross_amount 
-      } = payload;
+      const { order_id, transaction_status, fraud_status, payment_type, transaction_id, signature_key, gross_amount } = payload;
 
-      // 1. Verify Signature (Security)
       const isValidSignature = verifyWebhookSignature(
-        order_id, 
-        transaction_status, 
-        gross_amount, 
-        config.midtrans.serverKey || '', 
-        signature_key
+        order_id, transaction_status, gross_amount, config.midtrans.serverKey || '', signature_key
       );
 
       if (!isValidSignature) {
-         logger.warn(`⚠️ Invalid Webhook Signature for Order: ${order_id}`);
          throw new Error('Invalid Webhook Signature');
       }
 
-      // 2. Determine New Status
       const newStatus = mapMidtransStatus(transaction_status, fraud_status);
-      
-      // 3. Find Payment
       const payment = await Payment.findOne({ 
         $or: [{ orderId: order_id }, { transactionId: transaction_id }] 
       }).session(session);
 
-      if (!payment) {
-        throw new NotFoundError(`Payment not found for Order ID: ${order_id}`);
-      }
-
-      // 4. Idempotency Check
+      if (!payment) throw new NotFoundError(`Payment not found for Order ID: ${order_id}`);
+      
       if (payment.status === newStatus) {
         await session.commitTransaction();
         return { success: true, status: newStatus };
       }
 
-      // 5. Update Payment
       payment.status = newStatus;
       payment.paymentMethod = payment_type || payment.paymentMethod;
       
@@ -243,17 +197,12 @@ export class PaymentService {
       
       await payment.save({ session });
 
-      // 6. Update Enrollment (Atomic)
       if (newStatus === PaymentStatus.SETTLEMENT || newStatus === PaymentStatus.CAPTURE) {
         const enrollment = await Enrollment.findById(payment.enrollmentId).session(session);
         if (enrollment) {
           enrollment.status = 'active';
-          // Only reset progress if previously pending/cancelled to avoid resetting active user
-          if (['pending_payment', 'cancelled'].includes(enrollment.status)) {
-             enrollment.progress = 0;
-          }
+          if (['pending_payment', 'cancelled'].includes(enrollment.status)) enrollment.progress = 0;
           await enrollment.save({ session });
-          logger.info(`✅ Enrollment activated for user ${enrollment.userId}`);
         }
       } else if (newStatus === PaymentStatus.CANCEL || newStatus === PaymentStatus.EXPIRE) {
          const enrollment = await Enrollment.findById(payment.enrollmentId).session(session);
@@ -264,8 +213,7 @@ export class PaymentService {
       }
 
       await session.commitTransaction();
-      logger.info(`✅ Webhook processed: ${order_id} -> ${newStatus}`);
-
+      logger.info(`Webhook processed: ${order_id} -> ${newStatus}`);
       return { success: true, status: newStatus };
 
     } catch (error: any) {
@@ -277,88 +225,29 @@ export class PaymentService {
     }
   }
 
-  /**
-   * Get transaction details from Midtrans
-   */
-  async getTransactionDetails(transactionId: string): Promise<any> {
-    try {
-      return await (coreApi as any).transaction.status(transactionId);
-    } catch (error: any) {
-      logger.error(`Failed to get transaction details for ${transactionId}:`, error);
-      throw error;
-    }
-  }
-
-  /**
-   * Cancel transaction and update DB
-   */
   async cancelTransaction(transactionId: string): Promise<void> {
     try {
-      // 1. Cancel in Midtrans
       await (coreApi as any).transaction.cancel(transactionId);
-      
-      // 2. Update DB
-      await Payment.findOneAndUpdate(
-        { transactionId },
-        { status: PaymentStatus.CANCEL }
-      );
-      
-      logger.info(`✅ Transaction cancelled: ${transactionId}`);
+      await Payment.findOneAndUpdate({ transactionId }, { status: PaymentStatus.CANCEL });
     } catch (error: any) {
       logger.error(`Failed to cancel transaction ${transactionId}:`, error);
       throw error;
     }
   }
 
-  /**
-   * Expire transaction and update DB
-   */
-  async expireTransaction(transactionId: string): Promise<void> {
-    try {
-      await (coreApi as any).transaction.expire(transactionId);
-      
-      await Payment.findOneAndUpdate(
-        { transactionId },
-        { status: PaymentStatus.EXPIRE }
-      );
-
-      logger.info(`✅ Transaction expired: ${transactionId}`);
-    } catch (error: any) {
-      logger.error(`Failed to expire transaction ${transactionId}:`, error);
-      throw error;
-    }
-  }
-
-  /**
-   * Process refund and update DB
-   */
-  async refundTransaction(
-    transactionId: string,
-    amount?: number,
-    reason?: string
-  ): Promise<any> {
+  async refundTransaction(transactionId: string, amount?: number, reason?: string): Promise<any> {
     try {
       const parameter: any = {};
-
       if (amount) {
         parameter.refund_key = `refund-${transactionId}-${Date.now()}`;
         parameter.amount = amount;
       }
-      if (reason) {
-        parameter.reason = reason;
-      }
+      if (reason) parameter.reason = reason;
 
       const result: any = await (coreApi as any).transaction.refund(transactionId, parameter);
-
       const newStatus = amount ? PaymentStatus.PARTIAL_REFUND : PaymentStatus.REFUND;
+      await Payment.findOneAndUpdate({ transactionId }, { status: newStatus });
       
-      await Payment.findOneAndUpdate(
-        { transactionId },
-        { status: newStatus }
-      );
-
-      logger.info(`✅ Refund processed: ${transactionId}`, { amount, reason });
-
       return result;
     } catch (error: any) {
       logger.error(`Failed to refund transaction ${transactionId}:`, error);
@@ -366,50 +255,74 @@ export class PaymentService {
     }
   }
 
-  /**
-   * Get available payment methods (Static Data)
-   */
+  async getPaymentByOrderId(orderId: string) {
+    const payment = await Payment.findOne({ orderId });
+    if (!payment) throw new NotFoundError('Transaction not found');
+    return payment;
+  }
+
+  async getPaymentById(id: string) {
+    const payment = await Payment.findById(id).populate('userId', 'fullName email').populate('courseId', 'title price');
+    if (!payment) throw new NotFoundError('Payment not found');
+    return payment;
+  }
+
+  async getUserPayments(userId: string, limit: number = 50) {
+    return await Payment.find({ userId })
+      .sort({ createdAt: -1 })
+      .limit(limit)
+      .populate('courseId', 'title');
+  }
+
+  async updatePaymentStatus(transactionId: string, status: string) {
+    const payment = await Payment.findOneAndUpdate(
+      { transactionId },
+      { status },
+      { new: true }
+    );
+    if (!payment) throw new NotFoundError('Transaction not found');
+    return payment;
+  }
+
+  async getPaymentStatistics() {
+    const stats = await Payment.aggregate([
+      {
+        $group: {
+          _id: "$status",
+          count: { $sum: 1 },
+          totalAmount: { $sum: "$amount" }
+        }
+      }
+    ]);
+    return stats;
+  }
+
+  async getAllTransactions(page: number = 1, limit: number = 10, status?: string) {
+    const skip = (page - 1) * limit;
+    const query: any = {};
+    if (status) query.status = status;
+
+    const total = await Payment.countDocuments(query);
+    const transactions = await Payment.find(query)
+      .populate('userId', 'fullName email')
+      .populate('enrollmentId')
+      .skip(skip)
+      .limit(limit)
+      .sort({ createdAt: -1 });
+
+    return { transactions, total, page, limit, pages: Math.ceil(total / limit) };
+  }
+
   getAvailablePaymentMethods(): Record<string, any> {
     return {
-      creditCard: {
-        name: 'Credit/Debit Card',
-        enabled: true,
-        icon: 'credit-card',
-        currencies: ['IDR', 'USD']
-      },
-      bankTransfer: {
-        name: 'Bank Transfer',
-        enabled: true,
-        icon: 'bank',
-        currencies: ['IDR'],
-        banks: ['bca', 'bni', 'bri', 'mandiri']
-      },
-      eWallet: {
-        name: 'E-Wallet',
-        enabled: true,
-        icon: 'wallet',
-        currencies: ['IDR'],
-        providers: ['gopay', 'ovo', 'dana', 'linkaja']
-      },
-      bnpl: {
-        name: 'Buy Now Pay Later',
-        enabled: true,
-        icon: 'calendar',
-        currencies: ['IDR'],
-        providers: ['kredivo', 'akulaku']
-      },
-      echannel: {
-        name: 'E-Channel (ATM)',
-        enabled: true,
-        icon: 'atm',
-        currencies: ['IDR']
-      }
+      creditCard: { name: 'Credit/Debit Card', enabled: true, icon: 'credit-card', currencies: ['IDR', 'USD'] },
+      bankTransfer: { name: 'Bank Transfer', enabled: true, icon: 'bank', currencies: ['IDR'], banks: ['bca', 'bni', 'bri', 'mandiri'] },
+      eWallet: { name: 'E-Wallet', enabled: true, icon: 'wallet', currencies: ['IDR'], providers: ['gopay', 'ovo', 'dana', 'linkaja'] },
+      bnpl: { name: 'Buy Now Pay Later', enabled: true, icon: 'calendar', currencies: ['IDR'], providers: ['kredivo', 'akulaku'] },
+      echannel: { name: 'E-Channel (ATM)', enabled: true, icon: 'atm', currencies: ['IDR'] }
     };
   }
 
-  /**
-   * Check if amount is eligible for payment
-   */
   isPaymentEligible(amount: number): boolean {
     return amount >= 1000 && amount <= 999999999;
   }

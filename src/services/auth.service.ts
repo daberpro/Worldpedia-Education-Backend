@@ -8,22 +8,11 @@ import {
   NotFoundError
 } from '../types/error.types';
 import { logger } from '../utils/logger';
+import EmailService from './email.service';
 
-/**
- * Auth Service - Handles user authentication and token management
- */
 export class AuthService {
-  /**
-   * Register new user
-   */
-  static async register(
-    fullName: string,
-    username: string,
-    email: string,
-    password: string
-  ) {
+  static async register(fullName: string, username: string, email: string, password: string) {
     try {
-      // Check if user exists
       const existingUser = await User.findOne({
         $or: [{ email: email.toLowerCase() }, { username: username.toLowerCase() }]
       });
@@ -33,20 +22,26 @@ export class AuthService {
         throw new ConflictError(`User with this ${field} already exists`);
       }
 
-      // Hash password
       const hashedPassword = await bcrypt.hash(password, 12);
+      
+      const activationCode = Math.floor(100000 + Math.random() * 900000).toString();
+      const activationExpire = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 jam
 
-      // Create user - Schema validation will handle password/username validation
       const user = new User({
         fullName,
         username: username.toLowerCase(),
         email: email.toLowerCase(),
         password: hashedPassword,
         role: 'student',
-        isVerified: false
+        isVerified: false,
+        activationCode,
+        activationExpire
       });
 
       await user.save();
+
+      const verificationLink = `http://localhost:3000/verify?email=${email}&code=${activationCode}`;
+      await EmailService.sendVerificationEmail(email, fullName, activationCode, verificationLink);
 
       logger.info(`User registered: ${email}`);
 
@@ -63,12 +58,8 @@ export class AuthService {
     }
   }
 
-  /**
-   * Login user
-   */
   static async login(usernameOrEmail: string, password: string) {
     try {
-      // Find user
       const user = await User.findOne({
         $or: [
           { email: usernameOrEmail.toLowerCase() },
@@ -80,12 +71,10 @@ export class AuthService {
         throw new UnauthorizedError('Invalid credentials');
       }
 
-      // Check if account is locked
       if (user.isAccountLocked()) {
         throw new UnauthorizedError('Account is locked. Please try again later');
       }
 
-      // Verify password
       const isPasswordValid = await bcrypt.compare(password, user.password);
 
       if (!isPasswordValid) {
@@ -94,17 +83,14 @@ export class AuthService {
         throw new UnauthorizedError('Invalid credentials');
       }
 
-      // Reset login attempts
       user.resetLoginAttempts();
       await user.save();
 
-      // Update last login
       user.lastLogin = new Date();
       await user.save();
 
       logger.logAuth('login', user._id.toString(), true);
 
-      // Generate tokens
       const tokens = this.generateTokens(user);
 
       return {
@@ -125,15 +111,7 @@ export class AuthService {
     }
   }
 
-  /**
-   * Generate JWT tokens
-   */
   static generateTokens(user: any): { accessToken: string; refreshToken: string } {
-    const jwtAccessSecret = config.jwtAccessSecret as string;
-    const jwtRefreshSecret = config.jwtRefreshSecret as string;
-    const jwtAccessExpiry = config.jwtAccessExpiry as string;
-    const jwtRefreshExpiry = config.jwtRefreshExpiry as string;
-
     const payload = {
       userId: user._id.toString(),
       email: user.email,
@@ -141,29 +119,22 @@ export class AuthService {
       role: user.role
     };
 
-    const accessToken = jwt.sign(payload, jwtAccessSecret, {
-      expiresIn: jwtAccessExpiry as string
+    const accessToken = jwt.sign(payload, config.jwtAccessSecret, {
+      expiresIn: config.jwtAccessExpiry
     } as SignOptions);
 
     const refreshToken = jwt.sign(
       { userId: user._id.toString() },
-      jwtRefreshSecret,
-      {
-        expiresIn: jwtRefreshExpiry as string
-      } as SignOptions
+      config.jwtRefreshSecret,
+      { expiresIn: config.jwtRefreshExpiry } as SignOptions
     );
 
     return { accessToken, refreshToken };
   }
 
-  /**
-   * Refresh access token
-   */
   static async refreshToken(refreshToken: string) {
     try {
-      const jwtRefreshSecret = config.jwtRefreshSecret as string;
-      const decoded = jwt.verify(refreshToken, jwtRefreshSecret) as any;
-
+      const decoded = jwt.verify(refreshToken, config.jwtRefreshSecret) as any;
       const user = await User.findById(decoded.userId);
 
       if (!user) {
@@ -171,7 +142,6 @@ export class AuthService {
       }
 
       const tokens = this.generateTokens(user);
-
       logger.info(`Token refreshed for user: ${user._id}`);
 
       return {
@@ -184,20 +154,14 @@ export class AuthService {
     }
   }
 
-  /**
-   * Logout user
-   */
   static async logout(userId: string) {
     try {
       const user = await User.findById(userId);
-
       if (user) {
         user.lastLogout = new Date();
         await user.save();
       }
-
       logger.logAuth('logout', userId, true);
-
       return { message: 'Logged out successfully' };
     } catch (error) {
       logger.error('Logout error', error);
@@ -205,36 +169,19 @@ export class AuthService {
     }
   }
 
-  /**
-   * Verify email
-   */
   static async verifyEmail(email: string, activationCode: string) {
     try {
       const user = await User.findOne({ email: email.toLowerCase() });
 
-      if (!user) {
-        throw new NotFoundError('User not found');
-      }
-
-      if (user.isVerified) {
-        return { message: 'Email already verified' };
-      }
-
-      if (user.activationCode !== activationCode) {
-        throw new UnauthorizedError('Invalid activation code');
-      }
-
-      if (user.activationExpire && user.activationExpire < new Date()) {
-        throw new UnauthorizedError('Activation code has expired');
-      }
+      if (!user) throw new NotFoundError('User not found');
+      if (user.isVerified) return { message: 'Email already verified' };
+      if (user.activationCode !== activationCode) throw new UnauthorizedError('Invalid activation code');
+      if (user.activationExpire && user.activationExpire < new Date()) throw new UnauthorizedError('Activation code has expired');
 
       user.isVerified = true;
       user.activationCode = null as any;
       user.activationExpire = null as any;
-
       await user.save();
-
-      logger.info(`Email verified for user: ${email}`);
 
       return { message: 'Email verified successfully' };
     } catch (error) {
@@ -243,77 +190,40 @@ export class AuthService {
     }
   }
 
-  /**
-   * Request password reset
-   */
   static async requestPasswordReset(email: string) {
     try {
       const user = await User.findOne({ email: email.toLowerCase() });
-
-      if (!user) {
-        // Don't reveal if user exists
-        return { message: 'If user exists, password reset link will be sent' };
-      }
-
-      // Generate reset token
-      const jwtAccessSecret = config.jwtAccessSecret as string;
+      if (!user) return { message: 'If user exists, password reset link will be sent' };
 
       const resetToken = jwt.sign(
         { userId: user._id.toString(), type: 'reset' },
-        jwtAccessSecret,
+        config.jwtAccessSecret,
         { expiresIn: '1h' } as SignOptions
       );
 
       user.resetToken = resetToken;
-      user.resetExpire = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
-
+      user.resetExpire = new Date(Date.now() + 60 * 60 * 1000);
       await user.save();
 
-      logger.info(`Password reset requested for: ${email}`);
-
-      return { 
-        message: 'Password reset link sent to email',
-        resetToken // In production, send via email instead
-      };
+      return { message: 'Password reset link sent to email', resetToken };
     } catch (error) {
       logger.error('Password reset request error', error);
       throw error;
     }
   }
 
-  /**
-   * Reset password
-   */
-  static async resetPassword(
-    email: string,
-    token: string,
-    newPassword: string
-  ) {
+  static async resetPassword(email: string, token: string, newPassword: string) {
     try {
       const user = await User.findOne({ email: email.toLowerCase() });
+      if (!user) throw new NotFoundError('User not found');
+      if (!user.resetToken || user.resetToken !== token) throw new UnauthorizedError('Invalid reset token');
+      if (user.resetExpire && user.resetExpire < new Date()) throw new UnauthorizedError('Reset token has expired');
 
-      if (!user) {
-        throw new NotFoundError('User not found');
-      }
-
-      if (!user.resetToken || user.resetToken !== token) {
-        throw new UnauthorizedError('Invalid reset token');
-      }
-
-      if (user.resetExpire && user.resetExpire < new Date()) {
-        throw new UnauthorizedError('Reset token has expired');
-      }
-
-      // Hash new password - Schema validation will handle password requirements
       const hashedPassword = await bcrypt.hash(newPassword, 12);
-
       user.password = hashedPassword;
       user.resetToken = null as any;
       user.resetExpire = null as any;
-
       await user.save();
-
-      logger.info(`Password reset for user: ${email}`);
 
       return { message: 'Password reset successfully' };
     } catch (error) {
@@ -322,39 +232,50 @@ export class AuthService {
     }
   }
 
-  /**
-   * Change password
-   */
-  static async changePassword(
-    userId: string,
-    currentPassword: string,
-    newPassword: string
-  ) {
+  static async changePassword(userId: string, currentPassword: string, newPassword: string) {
     try {
       const user = await User.findById(userId).select('+password');
+      if (!user) throw new NotFoundError('User not found');
 
-      if (!user) {
-        throw new NotFoundError('User not found');
-      }
-
-      // Verify current password
       const isValid = await bcrypt.compare(currentPassword, user.password);
+      if (!isValid) throw new UnauthorizedError('Current password is incorrect');
 
-      if (!isValid) {
-        throw new UnauthorizedError('Current password is incorrect');
-      }
-
-      // Hash new password - Schema validation will handle password requirements
       const hashedPassword = await bcrypt.hash(newPassword, 12);
-
       user.password = hashedPassword;
       await user.save();
-
-      logger.info(`Password changed for user: ${userId}`);
 
       return { message: 'Password changed successfully' };
     } catch (error) {
       logger.error('Change password error', error);
+      throw error;
+    }
+  }
+
+  static async resendVerificationCode(email: string) {
+    try {
+      const user = await User.findOne({ email: email.toLowerCase() });
+      if (!user) throw new NotFoundError('User not found');
+      if (user.isVerified) return { message: 'Email already verified' };
+
+      const activationCode = Math.floor(100000 + Math.random() * 900000).toString();
+      const activationExpire = new Date(Date.now() + 24 * 60 * 60 * 1000);
+
+      user.activationCode = activationCode;
+      user.activationExpire = activationExpire;
+      await user.save();
+
+      const verificationLink = `http://localhost:3000/verify?email=${user.email}&code=${activationCode}`;
+      await EmailService.sendVerificationEmail(
+        user.email,
+        user.fullName,
+        activationCode,
+        verificationLink
+      );
+
+      logger.info(`Verification code resent to: ${email}`);
+      return { message: 'Verification code sent successfully' };
+    } catch (error) {
+      logger.error('Resend verification code error', error);
       throw error;
     }
   }

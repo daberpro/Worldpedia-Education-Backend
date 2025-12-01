@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { EnrollmentController } from '../controllers';
-import { authenticate } from '../middleware';
+import { authenticate, authorize } from '../middleware';
 
 const router = Router();
 
@@ -12,6 +12,7 @@ const router = Router();
 // Protected routes - all require authentication
 router.post('/', authenticate, EnrollmentController.createEnrollment);
 router.get('/my', authenticate, EnrollmentController.getMyEnrollments);
+router.get('/admin/list', authenticate, authorize(['admin']), EnrollmentController.getAllEnrollments);
 router.get('/:id', authenticate, EnrollmentController.getEnrollmentById);
 router.get('/student/:studentId', authenticate, EnrollmentController.getStudentEnrollments);
 router.get('/summary/:studentId', authenticate, EnrollmentController.getProgressSummary);

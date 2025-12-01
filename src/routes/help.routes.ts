@@ -4,12 +4,6 @@ import { authenticate, authorize } from '../middleware';
 
 const router = Router();
 
-/**
- * Help Routes
- * Base: /api/help
- */
-
-// Public routes
 router.post('/ask', HelpController.askHelp);
 router.get('/', HelpController.getCategories);
 router.get('/stats', HelpController.getHelpStats);
@@ -19,7 +13,7 @@ router.get('/:id', HelpController.getHelpArticleById);
 router.post('/:id/helpful', HelpController.markAsHelpful);
 router.post('/:id/not-helpful', HelpController.markAsNotHelpful);
 
-// Protected routes - Admin/Creator only
+// Admin routes
 router.post('/', authenticate, authorize(['admin']), HelpController.createHelpArticle);
 router.put('/:id', authenticate, authorize(['admin']), HelpController.updateHelpArticle);
 router.delete('/:id', authenticate, authorize(['admin']), HelpController.deleteHelpArticle);
