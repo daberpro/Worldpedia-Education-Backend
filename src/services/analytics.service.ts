@@ -1,53 +1,45 @@
 import { Analytics, Enrollment, Payment, Course, User } from '../models';
-import { NotFoundError } from '../types/error.types';
 import { logger } from '../utils/logger';
 
 /**
- * Analytics Service - Handles dashboard analytics
+ * Analytics Service - Implementation using MongoDB Aggregation Framework
+ * Optimized for performance and scalability.
  */
 export class AnalyticsService {
+  
   /**
-   * Get overall dashboard analytics
+   * Get Dashboard Overview
+   * Uses parallel execution of optimized count queries and aggregation
    */
   static async getDashboardAnalytics(startDate?: Date, endDate?: Date) {
     try {
-      const query: any = {};
+      const dateFilter = startDate && endDate ? { 
+        createdAt: { $gte: startDate, $lte: endDate } 
+      } : {};
 
-      if (startDate || endDate) {
-        query.createdAt = {};
-        if (startDate) query.createdAt.$gte = startDate;
-        if (endDate) query.createdAt.$lte = endDate;
-      }
+      const [
+        totalEnrollments,
+        activeEnrollments,
+        completedEnrollments,
+        totalUsers,
+        totalCourses,
+        revenueStats
+      ] = await Promise.all([
+        Enrollment.countDocuments(dateFilter),
+        Enrollment.countDocuments({ ...dateFilter, status: 'active' }),
+        Enrollment.countDocuments({ ...dateFilter, status: 'completed' }),
+        User.countDocuments(),
+        Course.countDocuments({ isActive: true }),
+        // Aggregation for Revenue
+        Payment.aggregate([
+            { $match: { status: 'settlement', ...dateFilter } },
+            { $group: { _id: null, total: { $sum: "$amount" } } }
+        ])
+      ]);
 
-      // Get enrollment data
-      const totalEnrollments = await Enrollment.countDocuments(query);
-      const activeEnrollments = await Enrollment.countDocuments({ status: 'active', ...query });
-      const completedEnrollments = await Enrollment.countDocuments({ status: 'completed', ...query });
-
-      // Get revenue data
-      const payments = await Payment.find({ status: 'completed', ...query });
-      const totalRevenue = payments.reduce((sum, p) => sum + p.amount, 0);
-
-      // Get user data
-      const totalUsers = await User.countDocuments();
-      const studentCount = await User.countDocuments({ role: 'student' });
-      const instructorCount = await User.countDocuments({ role: 'admin' });
-
-      // Get course data
-      const totalCourses = await Course.countDocuments();
-      const activeCourses = await Course.countDocuments({ isActive: true });
-
-      // Calculate metrics
-      const completionRate = totalEnrollments > 0
-        ? ((completedEnrollments / totalEnrollments) * 100).toFixed(2)
-        : 0;
-
-      const avgEnrollmentsPerCourse = totalCourses > 0
-        ? Math.round(totalEnrollments / totalCourses)
-        : 0;
-
-      const avgRevenuePerEnrollment = totalEnrollments > 0
-        ? Math.round(totalRevenue / totalEnrollments)
+      const totalRevenue = revenueStats[0]?.total || 0;
+      const completionRate = totalEnrollments > 0 
+        ? ((completedEnrollments / totalEnrollments) * 100).toFixed(2) 
         : 0;
 
       return {
@@ -58,75 +50,69 @@ export class AnalyticsService {
           completionRate
         },
         revenue: {
-          total: totalRevenue,
-          avgPerEnrollment: avgRevenuePerEnrollment,
-          transactions: payments.length
+          total: totalRevenue
         },
         users: {
-          total: totalUsers,
-          students: studentCount,
-          instructors: instructorCount
+          total: totalUsers
         },
         courses: {
-          total: totalCourses,
-          active: activeCourses
-        },
-        metrics: {
-          avgEnrollmentsPerCourse,
-          conversionRate: '0%'
+          total: totalCourses
         }
       };
     } catch (error) {
-      logger.error('Get dashboard analytics error', error);
+      logger.error('Dashboard analytics error', error);
       throw error;
     }
   }
 
   /**
-   * Get course-specific analytics
+   * Get course-specific analytics using Aggregation
    */
   static async getCourseAnalytics(courseId: string) {
     try {
-      const course = await Course.findById(courseId);
+      // Aggregate Enrollments
+      const enrollmentStats = await Enrollment.aggregate([
+        { $match: { courseId: courseId as any } },
+        { 
+          $group: {
+            _id: null,
+            total: { $sum: 1 },
+            active: { $sum: { $cond: [{ $eq: ["$status", "active"] }, 1, 0] } },
+            completed: { $sum: { $cond: [{ $eq: ["$status", "completed"] }, 1, 0] } },
+            cancelled: { $sum: { $cond: [{ $eq: ["$status", "cancelled"] }, 1, 0] } },
+            avgProgress: { $avg: "$progress" }
+          }
+        }
+      ]);
 
-      if (!course) {
-        throw new NotFoundError('Course not found');
-      }
+      // Aggregate Revenue
+      const revenueStats = await Payment.aggregate([
+        { $match: { courseId: courseId as any, status: 'settlement' } },
+        { $group: { _id: null, total: { $sum: "$amount" }, count: { $sum: 1 } } }
+      ]);
 
-      const enrollments = await Enrollment.find({ courseId });
-      const payments = await Payment.find({ courseId, status: 'completed' });
+      const stats = enrollmentStats[0] || { total: 0, active: 0, completed: 0, cancelled: 0, avgProgress: 0 };
+      const rev = revenueStats[0] || { total: 0, count: 0 };
 
-      const completedCount = enrollments.filter(e => e.status === 'completed').length;
-      const activeCount = enrollments.filter(e => e.status === 'active').length;
-      const cancelledCount = enrollments.filter(e => e.status === 'cancelled').length;
-
-      const avgProgress = enrollments.length > 0
-        ? Math.round(enrollments.reduce((sum, e) => sum + e.progress, 0) / enrollments.length)
-        : 0;
-
-      const totalRevenue = payments.reduce((sum, p) => sum + p.amount, 0);
-
-      const completionRate = enrollments.length > 0
-        ? ((completedCount / enrollments.length) * 100).toFixed(2)
+      const completionRate = stats.total > 0
+        ? ((stats.completed / stats.total) * 100).toFixed(2)
         : 0;
 
       return {
         courseId,
-        courseName: course.title,
         enrollments: {
-          total: enrollments.length,
-          active: activeCount,
-          completed: completedCount,
-          cancelled: cancelledCount,
+          total: stats.total,
+          active: stats.active,
+          completed: stats.completed,
+          cancelled: stats.cancelled,
           completionRate
         },
         progress: {
-          avgProgress,
-          totalProgress: enrollments.reduce((sum, e) => sum + e.progress, 0)
+          avgProgress: Math.round(stats.avgProgress)
         },
         revenue: {
-          total: totalRevenue,
-          transactions: payments.length
+          total: rev.total,
+          transactions: rev.count
         }
       };
     } catch (error) {
@@ -136,99 +122,80 @@ export class AnalyticsService {
   }
 
   /**
-   * Get enrollment trends (by date)
+   * Get Enrollment Trends (Daily) using Aggregation
    */
   static async getEnrollmentTrends(days: number = 30) {
     try {
       const startDate = new Date();
       startDate.setDate(startDate.getDate() - days);
 
-      const enrollments = await Enrollment.find({
-        enrolledAt: { $gte: startDate }
-      });
-
-      const trendData: any = {};
-
-      enrollments.forEach(enrollment => {
-        const dateValue = enrollment.enrolledDate || enrollment.enrolledAt;
-        if (dateValue) {
-          const date = new Date(dateValue as Date).toISOString().split('T')[0];
-          if (!trendData[date]) {
-            trendData[date] = 0;
+      const result = await Enrollment.aggregate([
+        { $match: { enrolledDate: { $gte: startDate } } },
+        {
+          $group: {
+            _id: { $dateToString: { format: "%Y-%m-%d", date: "$enrolledDate" } },
+            count: { $sum: 1 }
           }
-          trendData[date]++;
-        }
-      });
+        },
+        { $sort: { _id: 1 } },
+        { $project: { date: "$_id", enrollments: "$count", _id: 0 } }
+      ]);
 
       return {
         period: `Last ${days} days`,
-        data: Object.entries(trendData).map(([date, count]) => ({
-          date,
-          enrollments: count
-        }))
+        data: result
       };
     } catch (error) {
-      logger.error('Get enrollment trends error', error);
+      logger.error('Aggregation enrollment error', error);
       throw error;
     }
   }
 
   /**
-   * Get revenue trends
+   * Get Revenue Trends (Daily) using Aggregation
    */
   static async getRevenueTrends(days: number = 30) {
     try {
       const startDate = new Date();
       startDate.setDate(startDate.getDate() - days);
 
-      const payments = await Payment.find({
-        status: 'completed',
-        paidAt: { $gte: startDate }
-      });
-
-      const trendData: any = {};
-
-      payments.forEach(payment => {
-        const dateValue = payment.paidAt || payment.completedAt;
-        if (dateValue) {
-          const date = new Date(dateValue as Date).toISOString().split('T')[0];
-          if (!trendData[date]) {
-            trendData[date] = 0;
+      const result = await Payment.aggregate([
+        { 
+          $match: { 
+            status: 'settlement', 
+            paidAt: { $gte: startDate } 
+          } 
+        },
+        {
+          $group: {
+            _id: { $dateToString: { format: "%Y-%m-%d", date: "$paidAt" } },
+            dailyRevenue: { $sum: "$amount" },
+            count: { $sum: 1 }
           }
-          trendData[date] += payment.amount;
-        }
-      });
+        },
+        { $sort: { _id: 1 } },
+        { $project: { date: "$_id", revenue: "$dailyRevenue", transactions: "$count", _id: 0 } }
+      ]);
 
       return {
         period: `Last ${days} days`,
-        data: Object.entries(trendData).map(([date, revenue]) => ({
-          date,
-          revenue
-        }))
+        data: result
       };
     } catch (error) {
-      logger.error('Get revenue trends error', error);
+      logger.error('Aggregation revenue error', error);
       throw error;
     }
   }
 
   /**
-   * Get top courses by enrollment
+   * Get Top Courses by Enrollment
    */
   static async getTopCourses(limit: number = 10) {
     try {
-      const courses = await Course.find()
+      return await Course.find({ isActive: true })
+        .select('title level totalEnrollments totalRevenue price')
         .sort({ totalEnrollments: -1 })
         .limit(limit);
-
-      return courses.map(course => ({
-        courseId: course._id,
-        title: course.title,
-        level: course.level,
-        enrollments: course.totalEnrollments,
-        revenue: course.totalRevenue,
-        price: course.price
-      }));
     } catch (error) {
       logger.error('Get top courses error', error);
       throw error;
@@ -236,12 +203,24 @@ export class AnalyticsService {
   }
 
   /**
-   * Get student progress distribution
+   * Get Progress Distribution using $bucket Aggregation
    */
   static async getProgressDistribution() {
     try {
-      const enrollments = await Enrollment.find();
+      const result = await Enrollment.aggregate([
+        {
+          $bucket: {
+            groupBy: "$progress",
+            boundaries: [0, 25, 50, 75, 100],
+            default: "100", // For strictly 100
+            output: {
+              count: { $sum: 1 }
+            }
+          }
+        }
+      ]);
 
+      // Format result for frontend
       const distribution = {
         '0-25%': 0,
         '25-50%': 0,
@@ -249,39 +228,43 @@ export class AnalyticsService {
         '75-100%': 0
       };
 
-      enrollments.forEach(enrollment => {
-        const progress = enrollment.progress;
-        if (progress < 25) distribution['0-25%']++;
-        else if (progress < 50) distribution['25-50%']++;
-        else if (progress < 75) distribution['50-75%']++;
-        else distribution['75-100%']++;
+      result.forEach((bucket: any) => {
+        if (bucket._id === 0) distribution['0-25%'] = bucket.count;
+        else if (bucket._id === 25) distribution['25-50%'] = bucket.count;
+        else if (bucket._id === 50) distribution['50-75%'] = bucket.count;
+        else distribution['75-100%'] += bucket.count; // 75 and "100"
       });
 
       return distribution;
     } catch (error) {
-      logger.error('Get progress distribution error', error);
+      logger.error('Aggregation progress error', error);
       throw error;
     }
   }
 
   /**
-   * Get payment methods breakdown
+   * Get Payment Methods Breakdown
    */
   static async getPaymentMethodsBreakdown() {
     try {
-      const payments = await Payment.find({ status: 'completed' });
+      const result = await Payment.aggregate([
+        { $match: { status: 'settlement' } },
+        {
+          $group: {
+            _id: "$paymentMethod",
+            count: { $sum: 1 },
+            totalAmount: { $sum: "$amount" }
+          }
+        },
+        { $sort: { count: -1 } }
+      ]);
 
       const breakdown: any = {};
-
-      payments.forEach(payment => {
-        if (!breakdown[payment.paymentMethod]) {
-          breakdown[payment.paymentMethod] = {
-            count: 0,
-            total: 0
-          };
-        }
-        breakdown[payment.paymentMethod].count++;
-        breakdown[payment.paymentMethod].total += payment.amount;
+      result.forEach(item => {
+        breakdown[item._id] = {
+          count: item.count,
+          total: item.totalAmount
+        };
       });
 
       return breakdown;
@@ -292,23 +275,28 @@ export class AnalyticsService {
   }
 
   /**
-   * Get level-wise enrollment distribution
+   * Get Level Distribution
    */
   static async getLevelDistribution() {
     try {
-      const courses = await Course.find();
+      const result = await Course.aggregate([
+        { $match: { isActive: true } },
+        {
+          $group: {
+            _id: "$level",
+            courses: { $sum: 1 },
+            enrollments: { $sum: "$totalEnrollments" }
+          }
+        },
+        { $sort: { enrollments: -1 } }
+      ]);
 
       const distribution: any = {};
-
-      courses.forEach(course => {
-        if (!distribution[course.level]) {
-          distribution[course.level] = {
-            courses: 0,
-            enrollments: 0
-          };
-        }
-        distribution[course.level].courses++;
-        distribution[course.level].enrollments += course.totalEnrollments;
+      result.forEach(item => {
+        distribution[item._id] = {
+          courses: item.courses,
+          enrollments: item.enrollments
+        };
       });
 
       return distribution;
@@ -319,21 +307,22 @@ export class AnalyticsService {
   }
 
   /**
-   * Export analytics to analytics collection
+   * Export Analytics Data Snapshot
    */
   static async exportAnalytics() {
     try {
       const dashboardData = await this.getDashboardAnalytics();
 
       const analytics = new Analytics({
-        dashboardMetrics: dashboardData,
-        exportedAt: new Date(),
-        period: 'monthly'
+        type: 'revenue', // Default type required by schema
+        data: dashboardData,
+        period: new Date(),
+        createdAt: new Date(),
+        updatedAt: new Date()
       });
 
       await analytics.save();
-
-      logger.info(`Analytics exported: ${analytics._id}`);
+      logger.info(`Analytics snapshot exported: ${analytics._id}`);
 
       return analytics;
     } catch (error) {

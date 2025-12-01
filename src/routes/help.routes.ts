@@ -10,6 +10,7 @@ const router = Router();
  */
 
 // Public routes
+router.post('/ask', HelpController.askHelp);
 router.get('/', HelpController.getCategories);
 router.get('/stats', HelpController.getHelpStats);
 router.get('/search', HelpController.searchByKeywords);

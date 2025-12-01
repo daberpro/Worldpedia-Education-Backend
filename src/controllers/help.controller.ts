@@ -7,6 +7,35 @@ import { logger } from '../utils/logger';
  * Help Controller - Handles help/FAQ endpoints
  */
 export class HelpController {
+  
+  /**
+   * [NEW] Ask for help (Rule-Based System)
+   * POST /api/help/ask
+   * Endpoint ini menangani input user dan mencocokkannya dengan pattern di database.
+   */
+  static async askHelp(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const { query } = req.body;
+
+      if (!query) {
+        res.status(400).json({
+          success: false,
+          error: 'Query is required'
+        });
+        return;
+      }
+
+      // Panggil Rule-Based Engine di Service
+      // Pastikan Anda sudah mengupdate HelpService dengan method processUserQuery
+      const result = await HelpService.processUserQuery(query);
+
+      res.status(200).json(successResponse(result, 'Help query processed'));
+    } catch (error) {
+      logger.error('Ask help controller error', error);
+      next(error);
+    }
+  }
+
   /**
    * Create help article
    * POST /api/help
