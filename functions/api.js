@@ -4,12 +4,13 @@ const serverless = require('serverless-http');
 const { createApp } = require('../dist/app.js'); 
 
 const app = express();
-
-// Mount the app created by your factory function
-app.use('/.netlify/functions', createApp());
-app.get('/', (req, res) => {
+const r = express.Router();
+r.get('/', (req, res) => {
     res.send('Hello from the root path!');
 });
+
+// Mount the app created by your factory function
+app.use('/.netlify/functions', r);
 
 // Export the handler using module.exports
 module.exports.handler = serverless(app);
