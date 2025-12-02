@@ -1,4 +1,4 @@
-import {createApp} from '../app';
+import {createApp} from '../dist/app.js';
 import express from 'express';
 import serverless from 'serverless-http';
 
