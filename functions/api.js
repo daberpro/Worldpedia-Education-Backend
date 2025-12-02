@@ -6,8 +6,7 @@ const app = express();
 
 // OPTION 1: Test Router (Keep this if you just want to test "Hello")
 // We mount it at both paths to be safe
-app.use('/.netlify/functions/api', r); // Handles /api/ requests
-app.use('/', createApp);                       // Handles local dev or direct root requests
+app.use('/.netlify/functions/api', createApp()); 
 
 // OPTION 2: Your Real App (Uncomment this when ready)
 // app.use('/.netlify/functions/api', createApp());
