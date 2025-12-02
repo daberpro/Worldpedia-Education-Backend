@@ -29,8 +29,8 @@ import { logger } from './utils/logger';
 /**
  * Express Application Factory
  */
-export const createApp = (): Express => {
-  const app = express();
+export const createApp = (): any => {
+  const app = express.Router();
 
   /**
    * SECURITY & CONFIGURATION
