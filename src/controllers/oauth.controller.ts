@@ -1,9 +1,3 @@
-/**
- * OAuth Controller - FIXED VERSION
- * File: src/controllers/oauth.controller.ts
- * Fixed: Type issues, unused parameters, and default export
- */
-
 import { Request, Response } from 'express';
 import { logger } from '../utils/logger';
 import googleOAuthService from '../services/google-oauth.service';

@@ -254,8 +254,14 @@ export class AuthService {
   static async resendVerificationCode(email: string) {
     try {
       const user = await User.findOne({ email: email.toLowerCase() });
-      if (!user) throw new NotFoundError('User not found');
-      if (user.isVerified) return { message: 'Email already verified' };
+      
+      if (!user) {
+        throw new NotFoundError('User not found');
+      }
+
+      if (user.isVerified) {
+        return { message: 'Email already verified' };
+      }
 
       const activationCode = Math.floor(100000 + Math.random() * 900000).toString();
       const activationExpire = new Date(Date.now() + 24 * 60 * 60 * 1000);

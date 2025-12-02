@@ -11,7 +11,6 @@ export { HelpService } from './help.service';
 export { AnalyticsService } from './analytics.service';
 export { UserService } from './user.service';
 export { EmailService } from './email.service';
-export { EmailQueueService } from './email-queue.service';
 export { UploadService } from './upload.service';
 export { ImageService } from './image.service';
 export { PaymentService } from './payment.service';
