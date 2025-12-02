@@ -16,6 +16,7 @@ export enum LogLevel {
  */
 export class Logger {
   private logDir = path.join(process.cwd(), 'logs');
+  private isFileLoggingEnabled = true; // Flag untuk status file logging
 
   constructor() {
     this.ensureLogDirectory();
@@ -23,10 +24,17 @@ export class Logger {
 
   /**
    * Ensure log directory exists
+   * Modified to handle Read-Only environments (like Vercel) gracefully
    */
   private ensureLogDirectory(): void {
-    if (!fs.existsSync(this.logDir)) {
-      fs.mkdirSync(this.logDir, { recursive: true });
+    try {
+      if (!fs.existsSync(this.logDir)) {
+        fs.mkdirSync(this.logDir, { recursive: true });
+      }
+    } catch (error) {
+      // Jika gagal membuat folder (misal di Vercel), matikan fitur log ke file
+      console.warn('⚠️ Logger: Cannot create logs directory (Read-only filesystem detected). File logging disabled.');
+      this.isFileLoggingEnabled = false;
     }
   }
 
@@ -45,12 +53,12 @@ export class Logger {
   private write(level: LogLevel, message: string, data?: any): void {
     const formattedMessage = this.formatMessage(level, message, data);
 
-    // Console output
+    // 1. Console output (Selalu jalan, ini yang akan muncul di Vercel Logs)
     const consoleMethod = this.getConsoleMethod(level);
     consoleMethod(formattedMessage);
 
-    // File output (only in production or for errors)
-    if (process.env.NODE_ENV === 'production' || level === LogLevel.ERROR) {
+    // 2. File output (Hanya jika diizinkan / tidak error saat init)
+    if (this.isFileLoggingEnabled && (process.env.NODE_ENV === 'production' || level === LogLevel.ERROR)) {
       this.writeToFile(level, formattedMessage);
     }
   }
@@ -77,11 +85,14 @@ export class Logger {
    * Write log to file
    */
   private writeToFile(level: LogLevel, message: string): void {
+    if (!this.isFileLoggingEnabled) return; // Double check
+
     try {
       const date = new Date().toISOString().split('T')[0];
       const filename = path.join(this.logDir, `${level.toLowerCase()}-${date}.log`);
       fs.appendFileSync(filename, message + '\n');
     } catch (error) {
+      // Silent fail jika tiba-tiba tidak bisa nulis, alihkan ke console error
       console.error('Failed to write log file:', error);
     }
   }
