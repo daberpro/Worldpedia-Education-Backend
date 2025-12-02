@@ -1,6 +1,38 @@
 import mongoose, { Schema, Document } from 'mongoose';
 
 /**
+ * @swagger
+ * components:
+ *   schemas:
+ *     Certificate:
+ *       type: object
+ *       properties:
+ *         serialNumber:
+ *           type: string
+ *           description: Nomor seri unik sertifikat
+ *         fileName:
+ *           type: string
+ *           description: Nama file di Google Drive
+ *         googleDriveLink:
+ *           type: string
+ *           description: Link download sertifikat
+ *         issueDate:
+ *           type: string
+ *           format: date-time
+ *           description: Tanggal diterbitkan
+ *         status:
+ *           type: string
+ *           enum: [available, assigned, accessed]
+ *           description: Status sertifikat
+ *       example:
+ *         serialNumber: "CERT-2025-00123"
+ *         fileName: "certificate_john_doe.pdf"
+ *         googleDriveLink: "https://drive.google.com/..."
+ *         issueDate: "2025-01-20T10:30:00Z"
+ *         status: "available"
+ */
+
+/**
  * Certificate Interface
  */
 export interface ICertificate extends Document {

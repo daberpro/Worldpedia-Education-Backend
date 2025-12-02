@@ -1,11 +1,56 @@
-import mongoose, { Schema, Document } from 'mongoose';
+import mongoose, { Schema, Document } from "mongoose";
+
+/**
+ * @swagger
+ * components:
+ *   schemas:
+ *     User:
+ *       type: object
+ *       required:
+ *         - fullName
+ *         - username
+ *         - email
+ *         - password
+ *       properties:
+ *         id:
+ *           type: string
+ *           description: Auto-generated ID dari MongoDB
+ *         fullName:
+ *           type: string
+ *           description: Nama lengkap pengguna
+ *         username:
+ *           type: string
+ *           description: Username unik
+ *         email:
+ *           type: string
+ *           format: email
+ *           description: Email pengguna
+ *         role:
+ *           type: string
+ *           enum: [student, admin]
+ *           default: student
+ *         isVerified:
+ *           type: boolean
+ *           description: Status verifikasi email
+ *         avatar:
+ *           type: string
+ *           description: URL foto profil
+ *       example:
+ *         id: 1234567890
+ *         fullName: John Doe
+ *         username: johndoe
+ *         email: john@example.com
+ *         role: student
+ *         isVerified: false
+ *         avatar: https://example.com/avatar.jpg
+ */
 
 export interface IUser extends Document {
   fullName: string;
   username: string;
   email: string;
   password: string;
-  role: 'student' | 'admin';
+  role: "student" | "admin";
   avatar?: string;
   isVerified: boolean;
   isLocked: boolean;
@@ -29,30 +74,30 @@ const userSchema = new Schema<IUser>(
   {
     fullName: {
       type: String,
-      required: [true, 'Full name is required'],
+      required: [true, "Full name is required"],
       minlength: 3,
       maxlength: 100,
-      trim: true
+      trim: true,
     },
     username: {
       type: String,
-      required: [true, 'Username is required'],
+      required: [true, "Username is required"],
       unique: true, // Otomatis membuat index
       minlength: 3,
       maxlength: 30,
       lowercase: true,
-      match: [/^[a-z0-9_]*[0-9][a-z0-9_]*$/, 'Invalid username format']
+      match: [/^[a-z0-9_]*[0-9][a-z0-9_]*$/, "Invalid username format"],
     },
     email: {
       type: String,
-      required: [true, 'Email is required'],
+      required: [true, "Email is required"],
       unique: true, // Otomatis membuat index
       lowercase: true,
-      match: [/^[^\s@]+@[^\s@]+\.[^\s@]+$/, 'Invalid email address']
+      match: [/^[^\s@]+@[^\s@]+\.[^\s@]+$/, "Invalid email address"],
     },
     password: {
       type: String,
-      required: [true, 'Password is required'],
+      required: [true, "Password is required"],
       minlength: 12,
       select: false,
       validate: {
@@ -61,16 +106,17 @@ const userSchema = new Schema<IUser>(
           if (!/[a-z]/.test(v)) return false;
           if (!/[0-9]/.test(v)) return false;
           if (!/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(v)) return false;
-          const sequentialPattern = /(.)\1{2,}|(?:abc|bcd|cde|def|efg|fgh|ghi|hij|ijk|jkl|klm|lmn|mno|nop|opq|pqr|qrs|rst|stu|tuv|uvw|vwx|wxy|xyz|012|123|234|345|456|567|678|789)/i;
+          const sequentialPattern =
+            /(.)\1{2,}|(?:abc|bcd|cde|def|efg|fgh|ghi|hij|ijk|jkl|klm|lmn|mno|nop|opq|pqr|qrs|rst|stu|tuv|uvw|vwx|wxy|xyz|012|123|234|345|456|567|678|789)/i;
           return !sequentialPattern.test(v);
         },
-        message: 'Password does not meet complexity requirements'
-      }
+        message: "Password does not meet complexity requirements",
+      },
     },
     role: {
       type: String,
-      enum: ['student', 'admin'],
-      default: 'student'
+      enum: ["student", "admin"],
+      default: "student",
     },
     avatar: { type: String, default: null },
     isVerified: { type: Boolean, default: false },
@@ -82,7 +128,7 @@ const userSchema = new Schema<IUser>(
     activationCode: { type: String, default: null },
     activationExpire: { type: Date, default: null },
     resetToken: { type: String, default: null },
-    resetExpire: { type: Date, default: null }
+    resetExpire: { type: Date, default: null },
   },
   { timestamps: true }
 );
@@ -128,4 +174,4 @@ userSchema.methods.toJSON = function () {
   return userObject;
 };
 
-export const User = mongoose.model<IUser>('User', userSchema);
+export const User = mongoose.model<IUser>("User", userSchema);

@@ -2,6 +2,50 @@ import mongoose, { Schema, Document } from 'mongoose';
 import { PaymentStatus } from '../types/payment.types';
 
 /**
+ * @swagger
+ * components:
+ *   schemas:
+ *     Payment:
+ *       type: object
+ *       properties:
+ *         transactionId:
+ *           type: string
+ *           description: ID unik transaksi dari sistem
+ *         orderId:
+ *           type: string
+ *           description: ID order untuk Midtrans
+ *         amount:
+ *           type: number
+ *           description: Jumlah pembayaran
+ *         status:
+ *           type: string
+ *           enum: [pending, settlement, capture, deny, cancel, expire, refund, partial_refund]
+ *           description: Status transaksi
+ *         paymentMethod:
+ *           type: string
+ *           description: Metode pembayaran (gopay, bca_va, dll)
+ *         snapToken:
+ *           type: string
+ *           description: Token untuk popup Midtrans Snap
+ *         redirectUrl:
+ *           type: string
+ *           description: URL redirect pembayaran
+ *         paidAt:
+ *           type: string
+ *           format: date-time
+ *           description: Waktu pembayaran berhasil
+ *       example:
+ *         transactionId: "trx_123456789"
+ *         orderId: "ORDER-12345"
+ *         amount: 250000
+ *         status: "settlement"
+ *         paymentMethod: "gopay"
+ *         snapToken: "abcdef123456"
+ *         redirectUrl: "https://app.midtrans.com/redirect/123456"
+ *         paidAt: "2025-02-01T10:30:00Z"
+ */
+
+/**
  * Payment Interface
  */
 export interface IPayment extends Document {
