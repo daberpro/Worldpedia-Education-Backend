@@ -1,7 +1,12 @@
-import {createApp} from '../dist/app.js';
-import express from 'express';
-import serverless from 'serverless-http';
+const express = require('express');
+const serverless = require('serverless-http');
+// require() handles the path to your compiled app
+const { createApp } = require('../dist/app.js'); 
 
 const app = express();
+
+// Mount the app created by your factory function
 app.use('/.netlify/functions/api', createApp());
-export const handler = serverless(app);
+
+// Export the handler using module.exports
+module.exports.handler = serverless(app);
