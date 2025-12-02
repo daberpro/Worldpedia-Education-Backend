@@ -10,7 +10,7 @@ r.get('/', (req, res) => {
 });
 
 // Mount the app created by your factory function
-app.use('/.netlify/functions', r);
+app.use('/.netlify/functions/api', r);
 
 // Export the handler using module.exports
 module.exports.handler = serverless(app);
