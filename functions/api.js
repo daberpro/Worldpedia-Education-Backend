@@ -1,16 +1,21 @@
 const express = require('express');
 const serverless = require('serverless-http');
-// require() handles the path to your compiled app
 const { createApp } = require('../dist/app.js'); 
 
 const app = express();
 const r = express.Router();
+
 r.get('/', (req, res) => {
     res.send('Hello from the root path!');
 });
 
-// Mount the app created by your factory function
-app.use('/.netlify/functions/api', r);
+// OPTION 1: Test Router (Keep this if you just want to test "Hello")
+// We mount it at both paths to be safe
+app.use('/.netlify/functions/api', r); // Handles /api/ requests
+app.use('/', r);                       // Handles local dev or direct root requests
 
-// Export the handler using module.exports
+// OPTION 2: Your Real App (Uncomment this when ready)
+// app.use('/.netlify/functions/api', createApp());
+// app.use('/', createApp());
+
 module.exports.handler = serverless(app);
