@@ -6,7 +6,7 @@ const { createApp } = require('../dist/app.js');
 const app = express();
 
 // Mount the app created by your factory function
-app.use('/.netlify/functions/api', createApp());
+app.use('/.netlify/functions', createApp());
 
 // Export the handler using module.exports
 module.exports.handler = serverless(app);
